@@ -1,0 +1,5 @@
+This files contains codes I prepared for my Bachelor thesis "Design and analysis of experiments in exploratory and factor screening stages".
+
+-Thesis: PDF document with my finished thesis (available only in Spanish)
+-GraphsChap2 : Code used to create the graphs to visually check normality in the residuals
+-ExampleChap2 : Code used to simulate the data and analysis in chapter 2 of thesis 
