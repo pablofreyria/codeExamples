@@ -1,2 +1,2 @@
 # codeExamples
-Repository to upload some of my coding projects
+Quick folder where I upload some of the homeworks, projects and codes I can share 
