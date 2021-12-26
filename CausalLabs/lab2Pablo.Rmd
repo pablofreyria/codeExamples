@@ -1,0 +1,241 @@
+---
+title: "Lab2 - Solutions"
+subtitle: "Advanced Topics in Causal Inference"
+author: "Pablo Freyria"
+date: "9/20/2021"
+output: pdf_document
+---
+\textbf{Data structure 1:}\par
+1.- Considering the DGS $O=(W,A,L,\Delta,\Delta Y)$.The target parameter (ATE) can be written in terms of counterfactuals as $\Psi^F(P_{U,X})=E_{U,X}[Y_{a=1,\delta=1}]-E_{U,X}[Y_{a=0,\delta=1}]$. The counterfactual outcomes $Y_{a,\delta=1}$ are the outcomes we observe if, possibly contrary to the fact, subject received treatment $a$ and his outcome was observed.\par
+2.- We can intervene on the SCM to get at the causal question by deterministically setting $A=a$ in the equations that are used to generate the data.\par
+3.- One implementation of this can be:
+```{r Data1CF}
+
+generate_data1_intervene <- function(n,a=NULL,delta=NULL){
+  # function that follows a specific DGS with the form (W,A,L,Delta,Delta*Y) 
+  # and allows us to intervene in A and Delta
+
+  u_w <- runif(n)
+  u_a <- runif(n)
+  u_l <- rnorm(n,mean = 2,sd = 1)
+  u_d <- runif(n)
+  u_y <- rnorm(n,mean = 72,sd = 0.3)
+  
+  W <- u_w
+  if(is.null(a)){
+     A <- as.numeric(u_a<plogis(0.01*W))   
+  }else{
+     A <- rep(a,1)
+  }
+ 
+  L <- W +A+u_l
+  if(is.null(delta)){
+    Delta <- as.numeric(u_d<plogis(0.01*(W+A+L)))  
+  }else{
+    Delta <- rep(delta,1)
+  }
+  Y <- L +5*A+3*W-0.25*A*W + u_y
+  
+  Y[Delta==0] <- NA
+  ## ifelse is also good for this #
+  
+  dataX <- data.frame(W=W,A=A,L=L,Delta=Delta,Y=Y)
+  return(dataX)
+}
+
+print("4. Evaluate Psi with simulated counterfactuals.")
+Y_11 <- generate_data1_intervene(1e5,a=1,delta=1)
+Y_01 <- generate_data1_intervene(1e5,a=0,delta=1) 
+
+
+Psi_ux1 <- mean(Y_11$Y) - mean(Y_01$Y)
+print(sprintf("Psi = %.2f",Psi_ux1))
+```
+5. This can be interpreted as the expected difference in test scores if, possibly contrary to the fact, all students slept 8 or more hours compared to if students slept less than 8 hours.\par
+
+\textbf{Data structure 2: First causal question} \par
+1.- The causal parameter that would answer the causal question is the expected difference in exam scores at end of study if possibly contrary to the fact, all students slept 8 or more hours every night during the study vs. if they slept less than 8 hours every night of the study duration. The notation for this is: $\Psi^F_{U,X}=E[Y_{\bar{a}=1}]-E[Y_{\bar{a}=0}]$, where $\bar{a}=(a,a,a,a)$.\par
+
+2.- To intervene on the SCM we can deterministically input the desired values of $A(t)$ into our known equations. In this case we would compare the outcomes $Y$ when we set all $A(t)=1$ vs when we set all $A(t)=0$.\par
+
+3.- Said implementation would look like:
+```{r Data2}
+generate_data2_intervene <- function(n,abar){
+  # function that generates data in the form (L1,A1,L2,A2,L3,A3,L4,A4,Y)
+
+  U_L1 <- rnorm(n,0,1)
+  U_A1 <- runif(n)  
+  U_L2 <- rnorm(n,0,1)
+  U_A2 <- runif(n)
+  U_L3 <- rnorm(n,0,1)
+  U_A3 <- runif(n)  
+  U_L4 <- rnorm(n,0,1)
+  U_A4 <- runif(n)
+  
+  U_Y <- rnorm(n,mean = 72,sd = 3)
+  
+  L1 <- U_L1
+  #A1 <- as.numeric(U_A1<plogis(0.001*L1))
+  A1 <- abar[1]
+  L2 <- A1+L1+U_L2
+  #A2 <- as.numeric(U_A2<plogis(0.001*(L2+L1+A1)))
+  A2 <- abar[2]
+  L3 <- A1+L1+A2+L2+U_L3
+  #A3 <- as.numeric(U_A3<plogis(0.001*(L1+A1+L2+A2+L3)))
+  A3 <- abar[3]
+  L4 <- A1+L1+A2+L2+A3+L3+U_L4
+  #A4 <- as.numeric(U_A4<plogis(0.001*(L1+L2+L3+L4+A1+A2+A3)))
+  A4 <- abar[4]
+  Y <- 0.3*L1+A1+0.5*L2+A2+0.7*L3+A3+L4+A4-U_Y+130
+  
+  
+  dataX <- data.frame(L1,A1,L2,A2,L3,A3,L4,A4,Y)
+  return(dataX)
+}
+
+print("4. Evaluate Psi with simulated counterfactuals.")
+Y_1 <- generate_data2_intervene(1e5,abar=rep(1,4))
+Y_0 <- generate_data2_intervene(1e5,abar=rep(0,4)) 
+
+Psi_ux2 <- mean(Y_1$Y) - mean(Y_0$Y)
+print(sprintf("Psi = %.2f",Psi_ux2))
+```
+5.- Which can be interpreted as the expected difference in test scores if, possibly contrary to the fact, all students slept 8 or more hours for the 4 nights of study duration compared to if students slept less than 8 hours on all nights of study duration.\par
+
+\textbf{Data structure 2: Second causal question} \par
+Assuming a linear relationship between number of days a student got at least 8 hours of sleep, we are interested on the causal difference in test scores from an additional day of sleeping 8 hours or more. Let $a(t)$ be 1 if student slept more than 8 hours at day $t$. Our target parameter is then:
+\begin{equation*}
+  \Psi = (argmin_{\beta}\sum_{a(t)}(E[Y_{\bar{a}}]-(\beta_0+\beta_1\sum_t^K))^2)^{'}(0,1)
+\end{equation*}
+2.- To intervene on the SCM, first we compute all combinations for which $\sum_{t=1}^K a(t))=x, x\in[0,K]$ to estimate what is the score that students would get if, possibly contrary to the fact, they had $x$ days with 8 or more hours of sleep (regardless of ordering). This generates $2^K$ counterfactual outcomes ($Y_{\bar{a}=x}$), associated with $K+1$ different labels. Finally, we project $Y_x$ to the line $\beta_0 +\beta_1x$.\par
+
+3.- The intervention needed (using the modified DGS) can be as follows:
+```{r MSMTimeSleep}
+abar_combs <- as.matrix(expand.grid(c(0,1),c(0,1),c(0,1),c(0,1)))
+sum_abar <- numeric(16) 
+Y_abar <- numeric(16) 
+for(i in 1:16){
+  Y_abar[i] <- mean(generate_data2_intervene(1e5,abar=as.vector(abar_combs[i,]))$Y)
+  sum_abar[i] <- sum(abar_combs[i,])
+}
+
+linreg <- lm(Y_abar ~ sum_abar)
+
+
+print(sprintf("Psi = %.2f",linreg$coefficients[2]))
+
+```
+5,6.- This target parameter is the causal difference in test scores from having an additional day of sleeping 8 hours or more during the study duration.\par
+
+7.- To see if the model is correctly specified, we can compare to the true DGS (and noting that expectation turns exogenous variables to constants, so the following equalities are under the expected value)
+\begin{align*}
+Y &= 0.3* L1+A1+0.5* L2+A2+0.7*L3+A3+L4+A4-U_Y+130 \\
+&= 0.3* U_L1 + a1 + 1.2* (A1+U_L1+U_L2) +a2 + 0.7*(a1+U_L1+a2+U_L3) + a3 +a4 + L4+130\\
+&= a1 + 1.2(a1) + a2 + 0.7(a1+a2) +a3 +a4 + a1+a2+ a1 +a3 + a1+a2+a2+C\\
+&= a1(1+1.2+0.7+1+1+1) + a2(1+0.7+1+1+1) + a3(1+1+1) + a4 + C
+\end{align*}
+Here we see that $a(t)$ have different coefficients, so the sum as a summary measure is not appropiate and the model is thus incorrectly specified.\par
+
+8.- Extra bonus: Plot the values of $Y_a$ and the projection to the working linear model
+```{r Q2Bonus}
+plot(sum_abar,Y_abar,xlab="Total days with 8 hours or more of sleep",
+     ylab="Expected test result",
+     main = "Expected test results by amount of sleep and \n projection to working model")
+lines(sum_abar,linreg$fitted.values)
+
+```
+
+\textbf{Data structure 3:} \par
+1.- The target causal parameter can be written as: $\Psi = E[Y(3)_{\bar{a}=1}] - E[Y(3)_{\bar{a}=0}]$, where $E[Y(3)_{\bar{a}=0}]$ is the counterfactual probability of the student becoming sick by $t=3$ under, possibly contrary to the fact, a student did not get 8 hours of sleep for 2 nights before the statistics test.\par
+
+2.- To intervene on the SCM to get at the causal parameter of interest, we can deterministically set the intervention to having slept (or not) for more than 8 hours on the 2 days previous to the test.\par
+
+3.- Said intervention can be applied as:
+```{r DGS3Intervene}
+generate_data3_intervene <- function(n,abar){
+  # function that generates data in the form (L1,A1,Y2,L2,A2,Y3)
+
+  U_L1 <- rnorm(n,0,1)
+  U_A1 <- runif(n)
+  U_Y2 <- runif(n)
+  U_L2 <- rnorm(n,0,1)
+  U_A2 <- runif(n)
+  U_Y3 <- runif(n)
+ 
+  
+  L1 <- U_L1
+  A1 <- abar[1]
+  Y2 <- as.numeric(U_Y2<plogis(L1-2*A1-6))
+  
+  L2 <- ifelse(Y2==0,A1+L1+U_L2,NA)
+  A2 <- ifelse(Y2==0,abar[2],NA)
+  
+  Y3 <- ifelse(Y2==1,1,as.numeric(U_Y3<plogis(L1-2*A1+L2-A2)))
+  
+  
+  dataX <- data.frame(L1,A1,Y2,L2,A2,Y3)
+  return(dataX)
+}
+
+print("4. To evaluate the causal parameter of interest")
+Y3_11 <- generate_data3_intervene(1e5,abar=rep(1,2))
+Y3_00 <- generate_data3_intervene(1e5,abar=rep(0,2))
+Psi_q3 <- mean(Y3_11$Y3-Y3_00$Y3)
+
+print(sprintf("Psi= %.2f",Psi_q3))
+
+```
+5. This can be interpreted as the causal difference in the probability of becoming sick by the time of the test (third day) if student sleeps 8 hours or more for the previous 2 days vs if student sleeps less than 8 hours for the previous day\par
+\textbf{Data structure 4:}
+1.- Similar to the previous question, but we are forcing students to stay in class for the time of observation. That is, we include in our counterfactuals the condition, possibly contrary to the fact, of $C(t)=0$. In notation:
+\begin{equation*}
+  \Psi = E[Y(3)_{\bar{a}=1,c(2)=0}] - E[Y(3)_{\bar{a}=0,c(2)=0}]
+\end{equation*}
+
+2.To intervene in the SCM to get a the causal parameter of interest, we deterministically set our intervention in the SCM (set $A(t)=a(t),C(t)=$) and we compute the causal parameter of interest by taking the average to compute the expected value of the counterfactuals.\par
+
+3. Said intervention can be implemented as follows:
+```{r DGS4Intervene}
+
+generate_data4_intervene <- function(n,abar){
+  # function that generates data in the form (L1,C1,A1,Y2,L2,C2,A2,Y3), where:
+  # Ls are time dependent covariates
+  # Cs are right-censoring indicators
+  # As are the treatment assignments at time t
+  # Ys are the outcomes measured at each time point 
+
+  ## exogeneous varaibles
+  U_L1 <- rnorm(n,0,1)
+  U_C1 <- runif(n,0,1)
+  U_A1 <- runif(n)
+  U_Y2 <- runif(n)
+  
+  U_L2 <- rnorm(n,0,1)
+  U_C2 <- runif(n,0,1)
+  U_A2 <- runif(n)
+  U_Y3 <- runif(n)
+  
+  ## endogeneous varaibles
+  L1 <- U_L1
+  C1 <- rep(0,n)
+  A1 <- ifelse(C1==1,NA,abar[1])
+  Y2 <- ifelse(C1==1,NA,as.numeric(U_Y2<plogis(L1-2*A1-6)))
+  
+  L2 <- ifelse(Y2+C1>0,NA,L1+A1+U_L2) 
+  C2 <- ifelse(C1+Y2>0,NA,0)
+  A2 <- ifelse(C2+Y2>0,NA,abar[2])
+  Y3 <- ifelse(Y2==1,1,ifelse(C2==0,as.numeric(U_Y3<plogis(L1-2*A2+L2-A2)),NA))
+  
+  
+  dataX <- data.frame(L1,C1,A1,Y2,L2,C2,A2,Y3)
+  return(dataX)
+}
+
+print("4. Evaluate the causal parameter of interest")
+q4_11 <- generate_data4_intervene(1e5,abar=rep(1,2))
+q4_00 <- generate_data4_intervene(1e5,abar=rep(0,2))
+Psi_q4 <- mean(q4_11$Y3-q4_00$Y3)
+
+print(sprintf("Psi =  %.2f",Psi_q4))
+```
+This is the difference in probability of becoming sick by the time of the test (third day) caused by student sleeping 8 hours or more for the previous 2 days vs if student sleeps less than 8 hours for the previous day and all students stay in class for the time of observation
