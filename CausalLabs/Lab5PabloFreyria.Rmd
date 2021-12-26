@@ -1,0 +1,178 @@
+---
+title: "Lab5 - Solutions"
+subtitle: "Advanced Topics in Causal Inference"
+author: "Pablo Freyria"
+date: "10/26/2021"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Berkeley Classes/2021Fall/Causal2/Labs")
+library(ltmle)
+
+```
+
+Format of the ltmle package
+```{r Q3}
+load("DataStructure2.RData")
+head(ObsData2)
+
+Anodes <- c(2,4,6,8)
+
+```
+
+Q6: Estimating treatment specific mean using ltmle for gcomp, IPTW and TMLE
+```{r Subset_TMLE,warning=F,error=F,message=F}
+newdata <- subset(ObsData2,select = c("L1","A1","Y"))
+Anodes <- "A1"
+Lnodes <- "L1"
+Ynodes <- "Y"
+results.ltmle1 <- ltmle(newdata,Anodes=Anodes,Lnodes=Lnodes,Ynodes=Ynodes,
+                        abar = 1,variance.method = "ic")
+
+results.ltmle2 <- ltmle(newdata,Anodes=Anodes,Lnodes=Lnodes,Ynodes=Ynodes,
+                        abar = 1,variance.method = "ic",gcomp = T)
+
+summary(results.ltmle1,"tmle")
+summary(results.ltmle1,"iptw")
+summary(results.ltmle2,"gcomp")
+
+PsiHat.tmle <- results.ltmle1$estimates["tmle"]
+PsiHat.iptw <- results.ltmle1$estimates["iptw"]
+PsiHat.gcomp <- results.ltmle2$estimates["gcomp"]
+
+```
+Q7: Non parametric bootstraping for inference
+```{r NonParamBootstrap, echo=T,warning=F,error=F,message=F}
+### bootstrap
+B <- 500
+n <- nrow(newdata)
+
+Psi.ests.b <- matrix(NA,B,3)
+colnames(Psi.ests.b) <- c("gcomp","iptw","tmle")
+for (i in 1:B) {
+  boot_ids <- sample(1:n,n,replace = T)
+  bootData <- newdata[boot_ids,]
+  
+  results.ltmle1.b <- ltmle(bootData,Anodes=Anodes,Lnodes=Lnodes,Ynodes=Ynodes,
+                        abar = 1,variance.method = "ic")
+  Psi.ests.b[i,"iptw"] <- results.ltmle1.b$estimates["iptw"]
+  Psi.ests.b[i,"tmle"] <- results.ltmle1.b$estimates["tmle"]
+  
+  results.ltmle2.b <- ltmle(bootData,Anodes=Anodes,Lnodes=Lnodes,Ynodes=Ynodes,
+                        abar = 1,variance.method = "ic",gcomp = T)
+  
+  Psi.ests.b[i,"gcomp"] <- results.ltmle2.b$estimates["gcomp"]
+}
+
+
+# estimates and varianceof
+est_means <- colMeans(Psi.ests.b)
+
+est_vars <- diag(var(Psi.ests.b))
+
+### confidence intervals 
+alpha <- 0.05
+normal_ci <- matrix(NA,3,3)
+quanti_ci <- matrix(NA,3,3)
+colnames(normal_ci) <- colnames(quanti_ci) <- c("Point","Lower","Upper")
+rownames(normal_ci) <- rownames(quanti_ci) <- colnames(Psi.ests.b)
+
+#point estimate
+normal_ci[,1] <- quanti_ci[,1] <- est_means
+
+## normal approximation
+z_alp <- qnorm(alpha/2,lower.tail = F)
+normal_ci[,2] <- normal_ci[,1]-z_alp*est_vars
+normal_ci[,3] <- normal_ci[,1]+z_alp*est_vars
+
+# quantiles confidence intervals
+quanti_ci[,c(2,3)] <- apply(Psi.ests.b, 2, quantile,c(alpha/2,1- alpha/2))
+
+print(normal_ci)
+print(quanti_ci)
+
+```
+
+Q8: Incorporating Super Learner for ltmle
+```{r SL, warning=F,error=F,message=F}
+SL.Library <- c("SL.glm","SL.bayesglm","SL.mean")
+
+results.ltmle1.SL <- ltmle(newdata,Anodes=Anodes,Lnodes=Lnodes,Ynodes=Ynodes,
+                        abar = 1,SL.library = SL.Library,variance.method = "ic")
+
+results.ltmle2.SL <- ltmle(newdata,Anodes=Anodes,Lnodes=Lnodes,Ynodes=Ynodes,
+                        abar = 1,SL.library = SL.Library, variance.method = "ic",
+                        gcomp = T)
+
+summary(results.ltmle1,"tmle")
+summary(results.ltmle1,"iptw")
+summary(results.ltmle2,"gcomp")
+
+```
+
+Q9: Estimating additive treatment effect using ltmle for gcomp,IPTW and TMLE estimators 
+```{r AdditiveTxEffect,warning=F,error=F,message=F}
+Lnodes2 <- c("L1","L2","L3","L4") 
+Anodes2 <- c("A1","A2","A3","A4")
+Ynodes2 <- "Y"
+
+results.ltmle1.additive <- ltmle(ObsData2,Anodes=Anodes2,Lnodes=Lnodes2,
+                                 Ynodes=Ynodes2,abar = list(c(1,1,1,1),c(0,0,0,0)), 
+                                 variance.method = "ic")
+
+results.ltmle2.additive <- ltmle(ObsData2,Anodes=Anodes2,Lnodes=Lnodes2,
+                                 Ynodes=Ynodes2, abar = list(c(1,1,1,1),c(0,0,0,0)), 
+                                 variance.method = "ic",gcomp = T)
+
+summary(results.ltmle1.additive,"tmle")
+summary(results.ltmle1.additive,"iptw")
+summary(results.ltmle2.additive,"gcomp")
+
+```
+
+Q10: MSM in the point treatment setting using ltmleMSM
+```{r MSM,warning=F,error=F,message=F}
+load("ObsDataMSM.RData")
+head(ObsDataMSM)
+summary(ObsDataMSM)
+
+ObsDataMSM$A1 <- 0
+ObsDataMSM$A2 <- 0
+
+ObsDataMSM$A1[ObsDataMSM$A==1] <- 1
+ObsDataMSM$A2[ObsDataMSM$A==2] <- 1
+ObsDataMSM <- ObsDataMSM[,c("W1","W2","A1","A2","Y")]
+
+regimes <- list(function(row) c(1,0),
+                function(row) c(0,1),
+                function(row) c(0,0))
+
+summary.measures <- array(dim = c(3,1,1))
+summary.measures[,,1] <- c(1:3)
+dimnames(summary.measures)[[2]] <- "level"
+
+working.msm <- "Y~level"
+
+Anodes3 <- c("A1","A2")
+Lnodes3 <- c("W1","W2")
+Ynodes3 <- "Y" 
+
+results.msm <- ltmleMSM(ObsDataMSM,Anodes = Anodes3,Lnodes = Lnodes3,
+                        Ynodes = Ynodes3,regimes = regimes,
+                        working.msm = working.msm,
+                        summary.measures = summary.measures,
+                        variance.method = "ic")
+results.msm.gcomp <- ltmleMSM(ObsDataMSM,Anodes = Anodes3,Lnodes = Lnodes3,
+                        Ynodes = Ynodes3,regimes = regimes,
+                        working.msm = working.msm,
+                        summary.measures = summary.measures,gcomp = T,
+                        variance.method = "ic")
+
+summary(results.msm,"iptw")
+summary(results.msm,"tmle")
+summary(results.msm.gcomp,"gcomp")
+
+```

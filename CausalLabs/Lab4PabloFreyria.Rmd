@@ -1,0 +1,230 @@
+---
+title: "Lab4 - Solutions"
+subtitle: "Advanced Topics in Causal Inference"
+author: "Pablo Freyria"
+date: "10/12/2021"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Berkeley Classes/2021Fall/Causal2/Labs")
+
+```
+
+\textbf{Data structure 0}\par
+IPTW and stabilized IPTW for data structure 0
+```{r IPTWdata0}
+rm(list=ls())
+load("DataStructure0.RData")
+
+n <- nrow(ObsData0)
+
+gA1 <- glm(A1~L1,data = ObsData0,family = "binomial")
+gA2 <- glm(A2~L1+A1+L2,data = ObsData0,family = "binomial")
+
+gA1.1 <- predict(gA1,type="response")
+gA2.1 <- predict(gA2,type="response")
+
+#use to get the probability of receiving the treatment that was received
+GA1 <- ifelse(ObsData0$A1==1,gA1.1,1-gA1.1)
+GA2 <- ifelse(ObsData0$A2==1,gA2.1,1-gA2.1)
+
+# Only probability of receiving treatment
+par(mfrow=c(1,2))
+hist(gA1.1,xlim = c(0,1))
+hist(gA2.1,xlim = c(0,1)) # there are some close to 1
+
+summary(gA1.1)
+summary(gA2.1)
+
+## weights
+w_i <- 1/(GA1*GA2)
+summary(w_i) # doesn't seem to wild 
+
+IAbar11 <- (ObsData0$A1==1)*(ObsData0$A2==1)
+# summary(w_i[IAbar11==1])
+
+###ESTIMATOR
+Psi.IPTW <- mean(w_i*IAbar11*ObsData0$Y)
+Psi.sIPTW <- mean(w_i*IAbar11*ObsData0$Y)/mean(w_i*IAbar11)
+```
+
+Estimation of MSE for both IPTW and stabilized IPTW for data structure 0
+```{r EstPerformanceData0}
+B <- 500
+n <- 1000
+est_hist <- matrix(NA,B,2)
+set.seed(252)
+for (b in 1:B) {
+  
+  dataObs <- generate_data0(n)
+  
+  gA1 <- glm(A1~L1,data = dataObs,family = "binomial")
+  gA2 <- glm(A2~L1+A1+L2,data = dataObs,family = "binomial")
+
+  gA1.1 <- predict(gA1,type="response")
+  gA2.1 <- predict(gA2,type="response")
+
+  #use to get the probability of receiving the treatment that was received
+  GA1 <- ifelse(dataObs$A1==1,gA1.1,1-gA1.1)
+  GA2 <- ifelse(dataObs$A2==1,gA2.1,1-gA2.1)
+  
+  w_i <- 1/(GA1*GA2)
+  IAbar11 <- (dataObs$A1==1)*(dataObs$A2==1)
+  ###ESTIMATOR
+  Psi.IPTW <- mean(w_i*IAbar11*dataObs$Y)
+  Psi.sIPTW <- mean(w_i*IAbar11*dataObs$Y)/mean(w_i*IAbar11)
+  
+  est_hist[b,] <- c(Psi.IPTW,Psi.sIPTW)
+}
+
+bias <- colMeans(est_hist) - Psi.F0
+variance <- diag(var(est_hist))
+
+MSE_data0 <- variance + bias^2
+names(MSE_data0) <- c("IPTW","IPTW-st.")
+```
+
+\textbf{Data structure 2}\par
+Estimate and analyze the weights
+```{r Data2_Estg0}
+load("DataStructure2.RData")
+
+n <- nrow(ObsData2)
+
+#Estimate treatment mechanisms for each time
+# build models for each timepoint
+ga1 <- glm(A1~L1,data = ObsData2,family = "binomial") 
+ga2 <- glm(A2~L1+A1+L2,data = ObsData2,family = "binomial") 
+ga3 <- glm(A3~L1+A1+L2+A2+L3,data = ObsData2,family = "binomial") 
+ga4 <- glm(A4~L1+A1+L2+A2+L3+A3+L4,data = ObsData2,family = "binomial") 
+
+# predict the probability of receiving treatment
+ga1.1 <- predict(ga1,newdata=ObsData2,type="response")
+ga2.1 <- predict(ga2,newdata=ObsData2,type="response")
+ga3.1 <- predict(ga3,newdata=ObsData2,type="response")
+ga4.1 <- predict(ga4,newdata=ObsData2,type="response")
+
+summary(ga1.1)
+summary(ga2.1)
+summary(ga3.1)
+summary(ga4.1)
+
+```
+It doesn't seem that there is an issue with the weights: across each time points probability of receiving treatment is between 35% and 63%. However, we might get big weights for having received treatment at all 4 time points can become small fast; in this case its bounded by $0.35*0.42*0.42*0.47 = 0.02$, which is a weight of ~50; on the other hand, the highest probability of treatment we can expect is $0.52*0.58*0.64*0.63=0.12$, which is a weight of ~8.\par
+
+Analyze the weights for the treatment of interest $\bar{a}(4)=1$ and $\bar{a}(4)=0$
+```{r Data2weights}
+# assign the probability of receiving the treatment it was actually received
+tx_ga1 <- ifelse(ObsData2$A1==1,ga1.1,1-ga1.1)
+tx_ga2 <- ifelse(ObsData2$A2==1,ga2.1,1-ga2.1)
+tx_ga3 <- ifelse(ObsData2$A3==1,ga3.1,1-ga3.1)
+tx_ga4 <- ifelse(ObsData2$A4==1,ga4.1,1-ga4.1)
+
+# compute the weights and look at distribution
+iptw_wi <- 1/(tx_ga1*tx_ga2*tx_ga3*tx_ga4)
+summary(iptw_wi)
+
+#look on the subjects we are interested
+abar1 <- (ObsData2$A1==1)*(ObsData2$A2==1)*(ObsData2$A3==1)*(ObsData2$A4==1)
+abar0 <- (ObsData2$A1==0)*(ObsData2$A2==0)*(ObsData2$A3==0)*(ObsData2$A4==0)
+
+
+print(sprintf("Of the total %i subjects",n))
+print(sprintf("weights for abar=1 create a population of %.2f, compared to abar=0 of %.2f",
+              sum(iptw_wi[abar1==1]),sum(iptw_wi[abar0==1])))
+
+par(mfrow=c(1,3))
+hist(iptw_wi, freq = F, main = "Histogram of weights")
+hist(iptw_wi[abar1==1],freq = F,main = "Weights for Abar=1")
+hist(iptw_wi[abar0==1],freq = F,main = "Weights for Abar=0")
+```
+The weights look close to each other, and compared to the "best" and "worst" scenarios mentioned earlier, it looks like there is a lot of correlation with previous treatments; we seem to have reached the scenario of (independently) most likely treatment and we are away of having the least likely treatment iterative.\par
+
+Compute both IPTW and stabilized IPTW estimators.
+```{r s-IPTW_Estimators}
+## standard IPTW estimator
+psi.data2.iptw <- mean(iptw_wi*abar1*ObsData2$Y) - mean(iptw_wi*abar0*ObsData2$Y)
+
+## stabilized IPTW (Horvitz-Thompson)
+psi.data2.iptw.st <- mean(iptw_wi*abar1*ObsData2$Y)/mean(iptw_wi*abar1) - 
+  mean(iptw_wi*abar0*ObsData2$Y)/mean(iptw_wi*abar0)
+
+# compare results - bias
+print("Bias of IPTW estimator")
+Psi.F2 - psi.data2.iptw
+print("Bias of stabilized IPTW estimator")
+Psi.F2 - psi.data2.iptw.st
+```
+We see that the stabilized IPTW estimator is still biased, although the biased was reduced.\par
+
+Now for the MSM $E[Y_a] = \beta_0 + \beta_1\sum a$, we can run standard regression software by adding the weights. 
+```{r weightedMSM}
+
+# msm is E[Y_a] = B_0 + B_1\Sum a
+
+# compute sum a
+cum.a <- rowSums(ObsData2[c("A1","A2","A3","A4")])
+ObsData2$cumA <- cum.a
+
+# use the weights in the logistic regresion model
+model <- glm(Y~ cumA,family = "gaussian",data = ObsData2,weights = iptw_wi)
+
+# value of the target parameter "Change in score for each additional night of sleep
+model$coefficients[2]
+```
+
+Estimate the MSE for the IPTW and stabilized IPTW estimators for data structure 2. Although scale in data structure 0 and data structure 2 is different, we can see compare the MSE for both data structures and target parameters.
+```{r Data2Performance}
+B <- 500
+n <- 1000
+est_hist_data2 <- matrix(NA,B,2)
+set.seed(252)
+for (b in 1:B) {
+  
+  data2 <- generate_data2(n)
+  
+  ga1 <- glm(A1~L1,data = data2,family = "binomial") 
+  ga2 <- glm(A2~L1+A1+L2,data = data2,family = "binomial") 
+  ga3 <- glm(A3~L1+A1+L2+A2+L3,data = data2,family = "binomial") 
+  ga4 <- glm(A4~L1+A1+L2+A2+L3+A3+L4,data = data2,family = "binomial") 
+  
+  # predict the probability of receiving treatment
+  ga1.1 <- predict(ga1,newdata=data2,type="response")
+  ga2.1 <- predict(ga2,newdata=data2,type="response")
+  ga3.1 <- predict(ga3,newdata=data2,type="response")
+  ga4.1 <- predict(ga4,newdata=data2,type="response")
+
+  # use to get the probability of receiving the treatment that was received
+  tx_ga1 <- ifelse(data2$A1==1,ga1.1,1-ga1.1)
+  tx_ga2 <- ifelse(data2$A2==1,ga2.1,1-ga2.1)
+  tx_ga3 <- ifelse(data2$A3==1,ga3.1,1-ga3.1)
+  tx_ga4 <- ifelse(data2$A4==1,ga4.1,1-ga4.1)
+  
+  # compute weights and indicators
+  weight2_i <- 1/(tx_ga1*tx_ga2*tx_ga3*tx_ga4)
+  data2_abar1 <- (data2$A1==1)*(data2$A2==1)*(data2$A3==1)*(data2$A4==1)
+  data2_abar0 <- (data2$A1==0)*(data2$A2==0)*(data2$A3==0)*(data2$A4==0)
+  
+  ###ESTIMATOR
+  Psi2.IPTW <- mean(weight2_i*data2_abar1*data2$Y) - mean(weight2_i*data2_abar0*data2$Y)
+    
+  Psi2.IPTW.st <- mean(weight2_i*data2_abar1*data2$Y)/mean(weight2_i*data2_abar1) -
+    mean(weight2_i*data2_abar0*data2$Y)/mean(weight2_i*data2_abar0)
+  
+  est_hist_data2[b,] <- c(Psi2.IPTW,Psi2.IPTW.st)
+}
+
+bias <- colMeans(est_hist_data2) - Psi.F2
+variance <- diag(var(est_hist_data2))
+
+MSE_data2 <- variance + bias^2
+names(MSE_data2) <- c("IPTW","IPTW-st.")
+
+print(MSE_data0)
+
+print(MSE_data2)
+```
+And (surprisingly) we see that the stabilized verision of the estimate was slightly worse for data0, which might be of related that target parameter for data2 compares the difference in means among two populations; so unstabilized weights might result in comparing different pseudo-populations in the sense that we wouldn't be able to match one to one subjects under $a=1$ and $a=0$. 

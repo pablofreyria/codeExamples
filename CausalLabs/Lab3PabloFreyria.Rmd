@@ -1,0 +1,57 @@
+---
+title: "Lab3 - Solutions"
+subtitle: "Advanced Topics in Causal Inference"
+author: "Pablo Freyria"
+date: "9/21/2021"
+output: pdf_document
+---
+
+```{r DGS0}
+
+generate_data0 <- function(n){
+  # data structure (L1,A1,L2,A2,Y)
+  
+  # exogeneous variables
+  U_L1 <- runif(n)
+  U_A1 <- runif(n) 
+  U_L2 <- runif(n)
+  U_A2 <- runif(n)
+  
+  U_Y <- runif(n)
+  
+  # endogeneous variables
+  L1 <- as.numeric(U_L1 < 0.5)
+  A1 <- as.numeric(U_A1 < plogis(0.3-L1))
+  L2 <- as.numeric(U_L2 < plogis(-2 + 1.8*A1 + 2*L1))
+  A2 <- as.numeric(U_A2 < plogis(L2 + L1))
+  Y  <- as.numeric(U_Y < plogis(-3 + 1.3*A1 + 1.7*A2 + 1.3*L1 + 1.7*L2))
+  
+  X <- data.frame(L1,A1,L2,A2,Y)
+  return(X)
+  
+}
+set.seed(252)
+O <- generate_data0(1e6)
+```
+
+```{r GcompPoint}
+# 1. Generate a large number of observations
+
+# 2. Point-treatment g-computation formula for a_bar=1
+psi_1 <- mean(O$Y[O$A1==1 & O$A2==1& O$L1==0 & O$L2==0])*mean(O$L1==0 & O$L2==0)+ 
+  mean(O$Y[O$A1==1 & O$A2==1& O$L1==0 & O$L2==1])*mean(O$L1==0 & O$L2==1)+ 
+  mean(O$Y[O$A1==1 & O$A2==1& O$L1==1 & O$L2==0])*mean(O$L1==1 & O$L2==0)+ 
+  mean(O$Y[O$A1==1 & O$A2==1& O$L1==1 & O$L2==1])*mean(O$L1==1 & O$L2==1)
+
+# 3. Longitudinal g-computation formula
+psi_3 <- 0
+for (i in 0:3) {
+  l1 <- i%%2
+  l2 <- floor(i/2)
+  psi_3 <- psi_3 + mean(O$Y[O$A1==1 & O$A2==1& O$L1==l1 & O$L2==l2])*
+    mean(O$L2[O$A1==1 & O$L1==l1]==l2)*mean(O$L1==l1)
+}
+
+```
+
+

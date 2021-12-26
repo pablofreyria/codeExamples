@@ -1,0 +1,383 @@
+---
+title: "Lab6 - Solutions"
+subtitle: "Advanced Topics in Causal Inference"
+author: "Pablo Freyria"
+date: "11/09/2021"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Berkeley Classes/2021Fall/Causal2/Labs")
+library(ltmle)
+
+```
+
+Data Structure 0
+```{r Q1}
+load("DataStructure0.Rdata")
+
+n <- nrow(ObsData0)
+
+bound <- function(x){
+  x[x<0.01] <- 0.01
+  x[x>1]    <- 0.99
+  
+  return(x)
+}
+
+```
+
+```{r ParamGcomp,}
+param.gcomp0_fun <- function(abar){
+  
+  # conditional regressions
+  Q.Y.reg <- glm(Y~.,data=ObsData0,family = "binomial")
+  Q.L2.reg <- glm(L2~A1+L1,data = ObsData0,family = "binomial")
+  
+  # MonteCarlo simulation
+  S <- 1e4
+  ObsData0.MC <- ObsData0[sample(1:n,S,replace = T),]
+  l1_i <- ObsData0.MC$L1
+
+  Q.L2.MCvals <- predict(Q.L2.reg,newdata=data.frame(L1=l1_i,A1=abar[1]),
+                         type = "response")
+  l2_i <- rbinom(S,size=1,prob = Q.L2.MCvals)
+  
+  Q.Y.MCvals <- predict(Q.Y.reg,newdata=data.frame(L1=l1_i, A1=abar[1],
+                                                   L2=l2_i,A2=abar[2]),
+                        type = "response")
+  
+  y_i <- rbinom(S,size=1,prob = Q.Y.MCvals)
+  
+  #G comp estimation (P(Y=1|abar))
+  g_comp <- mean(y_i)
+  
+  return(g_comp)
+  
+}
+
+ICE.gcomp0_fun <- function(abar){
+  newdata <- ObsData0
+  newdata$A1 <- abar[1]
+  newdata$A2 <- abar[2]
+  
+  Q3.reg <- glm(Y~.,data=ObsData0,family = "binomial")
+  Q3 <- predict(Q3.reg,newdata=newdata,type="response")
+  
+  Q2.reg <- glm(Q3~L1+A1,data=ObsData0,family = "quasibinomial")
+  Q2 <- predict(Q2.reg,newdata=newdata,type="response")
+  
+  val <- mean(Q2)
+  
+  return(val)
+}
+
+TMLE.gcomp0_fun <- function(abar){
+  
+  # counterfactual data for predictions
+  newdata <- ObsData0
+  newdata$A1 <- abar[1]
+  newdata$A2 <- abar[2]
+  
+  # propensity scores
+  g1.A1 <- glm(A1~L1,data=ObsData0,family = "binomial")
+  g1.A2 <- glm(A2~L2+A1+L1,data=ObsData0,family = "binomial")
+  
+  g1.abar1.1 <- predict(g1.A1,newdata=ObsData0,type="response")
+  g1.abar2.1 <- predict(g1.A2,newdata= ObsData0,type="response")
+  
+  I1 <- ObsData0$A1==abar[1]
+  I2 <- ObsData0$A2==abar[2]&I1
+  
+  # regressions
+  Q3.reg <- glm(Y~.,data=ObsData0,family = "binomial")
+  logit.Q3 <- predict(Q3.reg,newdata=newdata,type="link")
+  H3 <- I2/bound(g1.abar1.1*g1.abar2.1)
+  ObsData0$logit.Q3 <- logit.Q3
+  Q3.reg.update <- glm(Y ~ offset(logit.Q3),weights = H3,family = "binomial",
+                       data=ObsData0)
+
+  Q3.star <- predict(Q3.reg.update,type="response")
+  
+  Q2.reg <- glm(Q3.star~L1+A1,data=ObsData0,family = "quasibinomial")
+  logit.Q2 <- predict(Q2.reg,newdata=newdata,type="link")
+
+  H2 <- I1/bound(g1.abar1.1)
+  Q2.reg.update <- glm(Q3.star ~ offset(logit.Q2),weights = H2,family = "quasibinomial",
+                       data=ObsData0)
+  Q2.star <- predict(Q2.reg.update,type="response")
+  
+  val <- mean(Q2.star)
+  
+  return(val)
+}
+
+```
+
+```{r PerformanceMetrics,warning=FALSE}
+B <- 500
+n <- nrow(ObsData0)
+abar <- c(1,1)
+
+estimates_data0 <- matrix(NA,B,3)
+colnames(estimates_data0) <- c("Param","ICE","TMLE")
+
+for (i in 1:B) {
+  ObsData0 <- generate_data0(n)
+  estimates_data0[i,1] <- param.gcomp0_fun(abar)
+  estimates_data0[i,2] <- ICE.gcomp0_fun(abar)
+  estimates_data0[i,3] <- TMLE.gcomp0_fun(abar)
+}
+performance_data0 <- matrix(NA,3,3)
+colnames(performance_data0) <- colnames(estimates_data0)
+rownames(performance_data0) <- c("bias","variance","MSE")
+
+performance_data0[1,] <- colMeans(estimates_data0) - Psi.F0
+performance_data0[2,] <- diag(var(estimates_data0))
+performance_data0[3,] <- performance_data0[1,]^2 + performance_data0[2,]
+performance_data0
+```
+
+Data structure 2
+```{r LoadQ2}
+
+load("DataStructure2.RData")
+n <- nrow(ObsData2)
+
+rescale0to1 <- function(Y){
+  rescaleY <- (Y-min(Y))/(max(Y)-min(Y))
+  
+  return(rescaleY)
+}
+rescaletoY <- function(scaled,y_scale){
+  orig_scaled <- scaled*(max(y_scale)-min(y_scale)) + min(y_scale)
+  
+  return(orig_scaled)
+}
+
+
+```
+
+```{r ParamGcomp2}
+param.gcomp2_fun <- function(Obsdata,abar){
+  nvars <- ncol(Obsdata)
+  nobs  <- nrow(Obsdata)
+  ## Estimates of the non intervention variables
+    #assuming data is (L1,A1,L2,A,L...A,L,A,Y)
+  Q.reg.Y <- glm(Y~.,family = "gaussian",data = Obsdata)
+  
+  Q.reg.lminus1 <- glm(L4~.,family = "gaussian",data = Obsdata[,c(1:(nvars-2))])
+  Q.reg.lminus2 <- glm(L3~.,family = "gaussian",data = Obsdata[,c(1:(nvars-4))])
+  Q.reg.lminus3 <- glm(L2~.,family = "gaussian",data = Obsdata[,c(1:(nvars-6))])
+  # L1 is handled with the empirical distribution
+  
+  S <- 1e4
+  Obsdata.MC <- Obsdata[sample(1:nobs,S,replace=T),]
+  newObsData <- data.frame(L1=Obsdata.MC$L1,
+                           A1=rep(abar[1],S))
+  
+  newObsData$L2 <- predict(Q.reg.lminus3,newdata=newObsData)
+  newObsData$A2 <- rep(abar[2],S)
+  
+  newObsData$L3 <- predict(Q.reg.lminus2,newdata=newObsData)
+  newObsData$A3 <- abar[3]
+  
+  newObsData$L4 <- predict(Q.reg.lminus1,newdata=newObsData)
+  newObsData$A4 <- abar[4]
+  
+  newObsData$Y <- predict(Q.reg.Y,newdata=newObsData)
+  
+  g_comp <- mean(newObsData$Y)
+  
+  return(g_comp)
+}
+
+ICE.gcomp2_fun <- function(ObsData,abar){
+  # counter factual data to make the predictions
+  Y_orig <- ObsData$Y 
+  ObsData$Y <- rescale0to1(ObsData$Y)
+  newObsData <- ObsData
+  newObsData$A1 <- abar[1]
+  newObsData$A2 <- abar[2]
+  newObsData$A3 <- abar[3]
+  newObsData$A4 <- abar[4]
+  
+  # indexes update the recursive regressions 
+  counter <- ncol(ObsData)
+  max_iter <- (counter - 1)/2 # remove L1 and then it's pairs At,Lt that are iterated over
+  t <- max_iter
+  
+  # store original data as well
+  data_aux <- ObsData
+  newObsData_aux <- newObsData
+  for (i in 1:max_iter) {
+    
+    # subset on the variables until time i
+    data_aux <- data_aux[,c(1:counter)]
+    newObsData_aux <- newObsData_aux[,c(1:counter)]
+    
+    # regression on the past and prediction on counterfactual dataset 
+    reg_outcome <- colnames(newObsData_aux)[counter]
+    reg_form <- as.formula(paste(reg_outcome,"~",
+                                 paste(colnames(newObsData_aux)[1:(counter-1)],
+                                       collapse = "+"),
+                                 collapse=""))
+    
+    reg.varT <- glm(reg_form,data=data_aux,family = "quasibinomial")
+    pred.varT <- predict(reg.varT,newdata = newObsData_aux,type="response")
+    
+    # prepare for next loop
+    counter <- counter - 2
+    data_aux[,counter] <- pred.varT
+    
+    colnames(data_aux)[counter] <- paste("Q",t,sep="",collapse = "")
+    colnames(newObsData_aux)[counter] <- paste("Q",t,sep="",collapse = "")
+    t <- t-1
+  }
+  
+  ice.regs <- rescaletoY(pred.varT,Y_orig)
+  ice.est <- mean(ice.regs)
+    
+  return(ice.est)
+}
+
+TMLE.gcomp2_fun <- function(ObsData,abar){
+  # counter factual data to make the predictions
+  Y_orig <- ObsData$Y 
+  ObsData$Y <- rescale0to1(ObsData$Y)
+  newObsData <- ObsData
+  newObsData$A1 <- abar[1]
+  newObsData$A2 <- abar[2]
+  newObsData$A3 <- abar[3]
+  newObsData$A4 <- abar[4]
+  
+  
+  ## indexes update the recursive regressions 
+  counter <- ncol(ObsData)
+  max_iter <- (counter - 1)/2 # remove L1 and then it's pairs At,Lt that are iterated over
+  t <- max_iter
+  
+  ## Tables with useful information for the clever covariates
+  a_cols <- grep("A",colnames(ObsData))
+  indicators <- matrix(NA,nrow = nrow(ObsData),ncol = t+1)
+  indicators[,1] <- 1
+  
+  weights <- matrix(NA,nrow =  nrow(ObsData),ncol = t+1)
+  weights[,1] <- 1
+  
+  for (i in (1:t)+1) {
+    indicators[,i] <- indicators[,(i-1)]*as.numeric(ObsData[,a_cols[i-1]]==abar[i-1])
+    
+    
+    weights_formula <- as.formula(paste(colnames(ObsData)[a_cols[i-1]],"~",
+                                        paste(colnames(ObsData)[1:(a_cols[i-1]-1)],
+                                              collapse = "+")
+    ))
+    weights_model <- glm(weights_formula,data=ObsData,family = "binomial")
+    weights_preds <- predict(weights_model,newdata=ObsData,type="response")
+    # probability of the received abar
+    weights_preds <- abar[i-1]*weights_preds + (1-abar[i-1])*(1-weights_preds)
+    weights[,i] <- bound(weights[,(i-1)]*weights_preds)
+  }
+  
+  # change order to go with the loop and remove the aux column
+  indicators[,1:(t+1)] <- indicators[,(t+1):1]
+  indicators <- indicators[,-(t+1)]
+  
+  weights[,1:(t+1)] <- weights[,(t+1):1]
+  weights <- weights[,-(t+1)]
+  
+  
+  # store original data as well
+  data_aux <- ObsData
+  newObsData_aux <- newObsData
+  for (i in 1:max_iter) {
+    
+    # subset on the variables until time i
+    data_aux <- data_aux[,c(1:counter)]
+    newObsData_aux <- newObsData_aux[,c(1:counter)]
+    
+    # regression on the past and prediction on counterfactual dataset 
+    reg_outcome <- colnames(newObsData_aux)[counter]
+    reg_form <- as.formula(paste(reg_outcome,"~",
+                                 paste(colnames(newObsData_aux)[1:(counter-1)],
+                                       collapse = "+"),
+                                 collapse=""))
+    
+    reg.varT <- glm(reg_form,data=data_aux,family = "quasibinomial")
+    logit.pred.varT <- predict(reg.varT,newdata = newObsData_aux,type="link")
+    
+    ## Target predictions for next iteration
+    #clever covariate
+    H <- indicators[,i]/weights[,i]
+    
+    # targeting step
+    target_model <- glm(data_aux[,counter]~ offset(logit.pred.varT),weights = H,
+                        family = "quasibinomial")
+    pred.varT_targeted <- predict(target_model,type="response")
+    
+    # prepare for next loop
+    counter <- counter - 2
+    #data_aux[,counter] <- pred.varT - previous, now targeted
+    data_aux[,counter] <- pred.varT_targeted 
+    
+    colnames(data_aux)[counter] <- paste("Q",t,sep="",collapse = "")
+    colnames(newObsData_aux)[counter] <- paste("Q",t,sep="",collapse = "")
+    t <- t-1
+  }
+  
+  tmle.regs <- rescaletoY(pred.varT_targeted,Y_orig)
+  tmle.est <- mean(tmle.regs)
+  
+  return(tmle.est)
+}
+
+```
+
+```{r RunDATA2}
+psi.gcomp2.MC <- param.gcomp2_fun(ObsData2,rep(1,4)) - 
+  param.gcomp2_fun(ObsData2,rep(0,4))
+
+psi.gcomp2.ICE <- ICE.gcomp2_fun(ObsData2,rep(1,4)) - 
+  ICE.gcomp2_fun(ObsData2,rep(0,4))
+
+psi.gcomp2.TMLE <- TMLE.gcomp2_fun(ObsData2,rep(1,4)) - 
+  TMLE.gcomp2_fun(ObsData2,rep(0,4))
+
+psi.gcomp2.MC
+psi.gcomp2.ICE
+psi.gcomp2.TMLE
+```
+
+```{r PerfMetrics2, message=FALSE,warning=F}
+B <- 500
+n <- nrow(ObsData2)
+abar1 <- rep(1,4)
+abar0 <- rep(0,4)
+
+estimates_data2 <- matrix(NA,B,3)
+colnames(estimates_data2) <- c("Param","ICE","TMLE")
+
+for (i in 1:B) {
+  ObsData2_1 <- generate_data2(n)
+  estimates_data2[i,1] <- param.gcomp2_fun(ObsData2_1,abar1) - 
+    param.gcomp2_fun(ObsData2_1,abar0)
+  
+  estimates_data2[i,2] <- ICE.gcomp2_fun(ObsData2_1,abar1) - 
+    ICE.gcomp2_fun(ObsData2_1,abar0)
+  
+  estimates_data2[i,3] <- TMLE.gcomp2_fun(ObsData2_1,abar1) - 
+    TMLE.gcomp2_fun(ObsData2_1,abar0)
+}
+performance_data2 <- matrix(NA,3,3)
+colnames(performance_data2) <- colnames(estimates_data2)
+rownames(performance_data2) <- c("bias","variance","MSE")
+
+performance_data2[1,] <- colMeans(estimates_data2) - Psi.F2
+performance_data2[2,] <- diag(var(estimates_data2))
+performance_data2[3,] <- performance_data2[1,]^2 + performance_data2[2,]
+performance_data2
+```
+
